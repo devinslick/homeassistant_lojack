@@ -25,30 +25,21 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
+    """Validate the user input allows us to connect."""
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
 
-    try:
-        # Test authentication
-        result = await hass.async_add_executor_job(
-            _test_authentication, username, password
-        )
-        if not result["success"]:
-            raise InvalidAuth(result.get("error", "Unknown authentication error"))
+    # Test authentication
+    result = await hass.async_add_executor_job(
+        _test_authentication, username, password
+    )
+    if not result["success"]:
+        raise CannotConnect(result.get("error", "Unknown authentication error"))
 
-        return {
-            "title": f"LoJack ({username})",
-            "asset_count": result.get("asset_count", 0),
-        }
-    except InvalidAuth:
-        raise
-    except Exception as err:
-        _LOGGER.error("Unexpected error during authentication: %s", err)
-        raise CannotConnect(f"Connection error: {err}") from err
+    return {
+        "title": f"LoJack ({username})",
+        "asset_count": result.get("asset_count", 0),
+    }
 
 
 def _test_authentication(username: str, password: str) -> dict[str, Any]:
@@ -85,7 +76,7 @@ def _test_authentication(username: str, password: str) -> dict[str, Any]:
         return {"success": False, "error": str(err)}
 
 
-class LoJackConfigFlow(ConfigFlow, domain=DOMAIN):
+class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for LoJack."""
 
     VERSION = 1
@@ -163,9 +154,9 @@ class LoJackConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class CannotConnect(HomeAssistantError):
+class CannotConnect(Exception):
     """Error to indicate we cannot connect."""
 
 
-class InvalidAuth(HomeAssistantError):
+class InvalidAuth(Exception):
     """Error to indicate there is invalid auth."""
