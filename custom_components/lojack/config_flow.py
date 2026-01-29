@@ -11,6 +11,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
 
@@ -28,52 +29,33 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     """Validate the user input allows us to connect."""
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
+    from lojack_clients import LoJackClient
+    from lojack_clients import AuthenticationError, ConnectionError
 
-    # Test authentication
-    result = await hass.async_add_executor_job(
-        _test_authentication, username, password
-    )
-    if not result["success"]:
-        raise CannotConnect(result.get("error", "Unknown authentication error"))
+    session = async_get_clientsession(hass)
+    base_url = "https://api.lojack.com"
 
-    return {
-        "title": f"LoJack ({username})",
-        "asset_count": result.get("asset_count", 0),
-    }
+    try:
+        client = await LoJackClient.create(base_url, username, password, session=session)
+        try:
+            devices = await client.list_devices()
+            asset_count = len(devices) if devices else 0
+        finally:
+            await client.close()
+
+        return {"title": f"LoJack ({username})", "asset_count": asset_count}
+
+    except AuthenticationError:
+        raise InvalidAuth("Invalid username or password")
+    except ConnectionError:
+        raise CannotConnect("Connection error")
+    except Exception as err:
+        raise CannotConnect(str(err))
 
 
 def _test_authentication(username: str, password: str) -> dict[str, Any]:
-    """Test authentication with LoJack API (blocking)."""
-    try:
-        from lojack_clients.identity import AuthenticatedClient as IdentityClient
-        from lojack_clients.identity.api.default import get_identity_token
-        from lojack_clients.services import AuthenticatedClient as ServicesClient
-        from lojack_clients.services.api.default import get_all_user_assets
-
-        # Create identity client and get token
-        identity_client = IdentityClient.from_login(username, password)
-        token_response = get_identity_token.sync(client=identity_client)
-
-        if token_response is None or not hasattr(token_response, 'token'):
-            return {"success": False, "error": "Failed to get authentication token"}
-
-        # Create services client and test by fetching assets
-        services_client = ServicesClient.from_token(token_response.token)
-        assets_response = get_all_user_assets.sync(client=services_client)
-
-        asset_count = 0
-        if assets_response and hasattr(assets_response, 'assets'):
-            asset_count = len(assets_response.assets) if assets_response.assets else 0
-
-        return {"success": True, "asset_count": asset_count}
-
-    except Exception as err:
-        error_str = str(err).lower()
-        if "401" in str(err) or "unauthorized" in error_str:
-            return {"success": False, "error": "Invalid username or password"}
-        if "connection" in error_str or "network" in error_str:
-            return {"success": False, "error": "Connection error"}
-        return {"success": False, "error": str(err)}
+    """Removed blocking test; kept for compatibility but not used."""
+    return {"success": False, "error": "Unsupported"}
 
 
 class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

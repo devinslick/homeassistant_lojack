@@ -10,6 +10,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DATA_ASSETS,
@@ -20,7 +21,7 @@ from .const import (
 )
 
 if TYPE_CHECKING:
-    from lojack_clients.services import AuthenticatedClient as ServicesClient
+    from lojack_clients.api import LoJackClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,20 +36,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     try:
-        # Authenticate and get services client
-        client = await hass.async_add_executor_job(
-            _authenticate, username, password
-        )
+        client = await _authenticate(hass, username, password)
     except Exception as err:
         _LOGGER.error("Failed to authenticate with LoJack: %s", err)
         raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
 
     # Create the data update coordinator
-    coordinator = LoJackDataUpdateCoordinator(
-        hass,
-        client,
-        entry,
-    )
+    coordinator = LoJackDataUpdateCoordinator(hass, client, entry)
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
@@ -73,28 +67,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-def _authenticate(username: str, password: str) -> "ServicesClient":
-    """Authenticate with LoJack and return a services client."""
-    from lojack_clients.identity import AuthenticatedClient as IdentityClient
-    from lojack_clients.identity.api.default import get_identity_token
-    from lojack_clients.services import AuthenticatedClient as ServicesClient
+async def _authenticate(hass: HomeAssistant, username: str, password: str) -> "LoJackClient":
+    """Authenticate with LoJack and return an async LoJackClient."""
+    from lojack_clients import LoJackClient
 
-    # Create identity client and get token
-    identity_client = IdentityClient.from_login(username, password)
-    token_response = get_identity_token.sync(client=identity_client)
+    session = async_get_clientsession(hass)
+    # Use the public API base URL
+    base_url = "https://api.lojack.com"
 
-    if token_response is None:
-        raise ConfigEntryAuthFailed("Failed to get authentication token")
-
-    # Create services client with the token
-    services_client = ServicesClient.from_token(token_response.token)
-
-    return services_client
+    client = await LoJackClient.create(base_url, username, password, session=session)
+    return client
 
 
-def _refresh_token(username: str, password: str) -> "ServicesClient":
-    """Refresh the authentication token."""
-    return _authenticate(username, password)
+async def _refresh_token(hass: HomeAssistant, username: str, password: str) -> "LoJackClient":
+    """Refresh the authentication by creating a new client."""
+    return await _authenticate(hass, username, password)
 
 
 class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -103,7 +90,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        client: "ServicesClient",
+        client: "LoJackClient",
         entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
@@ -124,29 +111,53 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from LoJack API."""
         try:
-            # Get all assets for the user
-            assets_response = await self.hass.async_add_executor_job(
-                self._fetch_assets
-            )
+            devices = await self.client.list_devices()
 
-            if assets_response is None:
-                raise UpdateFailed("Failed to fetch assets from LoJack")
-
-            # Process assets into a dictionary keyed by asset ID
             assets_data: dict[str, Any] = {}
 
-            if hasattr(assets_response, 'assets') and assets_response.assets:
-                for asset in assets_response.assets:
-                    asset_id = str(asset.id) if hasattr(asset, 'id') else None
-                    if asset_id:
-                        # Fetch detailed asset info including location
-                        detailed_asset = await self.hass.async_add_executor_job(
-                            self._fetch_asset_detail, asset_id
-                        )
-                        if detailed_asset:
-                            assets_data[asset_id] = detailed_asset
-                        else:
-                            assets_data[asset_id] = asset
+            for device in devices:
+                device_id = getattr(device, "id", None)
+                if not device_id:
+                    continue
+
+                # Try to get latest location
+                try:
+                    location = await device.get_location()
+                except Exception:
+                    location = None
+
+                asset: dict[str, Any] = {
+                    "id": device_id,
+                    "name": getattr(device, "name", None),
+                    "vin": getattr(device, "vin", None),
+                    "make": getattr(device, "make", None),
+                    "model": getattr(device, "model", None),
+                    "year": getattr(device, "year", None),
+                    "licensePlate": getattr(device, "license_plate", None),
+                    "odometer": getattr(device, "odometer", None),
+                }
+
+                if location:
+                    coords = None
+                    if getattr(location, "latitude", None) is not None and getattr(location, "longitude", None) is not None:
+                        coords = {
+                            "latitude": getattr(location, "latitude", None),
+                            "longitude": getattr(location, "longitude", None),
+                        }
+
+                    asset_location: dict[str, Any] = {
+                        "coordinates": coords,
+                        "accuracy": getattr(location, "accuracy", None),
+                        "address": getattr(location, "address", None),
+                        "timestamp": getattr(location, "timestamp", None),
+                        "speed": getattr(location, "speed", None),
+                        "heading": getattr(location, "heading", None),
+                        "raw": getattr(location, "raw", None),
+                    }
+
+                    asset["location"] = asset_location
+
+                assets_data[str(device_id)] = asset
 
             return {DATA_ASSETS: assets_data}
 
@@ -155,9 +166,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if "401" in str(err) or "unauthorized" in str(err).lower():
                 _LOGGER.info("Token expired, refreshing...")
                 try:
-                    self.client = await self.hass.async_add_executor_job(
-                        _refresh_token, self._username, self._password
-                    )
+                    self.client = await _refresh_token(self.hass, self._username, self._password)
                     # Retry the fetch
                     return await self._async_update_data()
                 except Exception as refresh_err:
@@ -166,18 +175,4 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ) from refresh_err
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
 
-    def _fetch_assets(self):
-        """Fetch all user assets (blocking)."""
-        from lojack_clients.services.api.default import get_all_user_assets
-
-        return get_all_user_assets.sync(client=self.client)
-
-    def _fetch_asset_detail(self, asset_id: str):
-        """Fetch detailed asset information (blocking)."""
-        from lojack_clients.services.api.default import get_asset
-
-        try:
-            return get_asset.sync(id=asset_id, client=self.client)
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch details for asset %s: %s", asset_id, err)
-            return None
+    # note: new async client is used; no blocking fetch helpers needed
