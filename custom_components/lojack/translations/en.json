@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LoJack Account",
+        "description": "Enter your LoJack/Spireon account credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate LoJack",
+        "description": "Please enter your password to re-authenticate.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to LoJack servers.",
+      "invalid_auth": "Invalid username or password.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "device_tracker": {
+      "lojack": {
+        "name": "Location"
+      }
+    }
+  }
+}
