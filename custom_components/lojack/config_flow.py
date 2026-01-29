@@ -6,15 +6,11 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-
-from lojack_clients.identity import AuthenticatedClient as IdentityClient
-from lojack_clients.identity.api.default import get_identity_token
-from lojack_clients.services import AuthenticatedClient as ServicesClient
-from lojack_clients.services.api.default import get_all_user_assets
 
 from .const import DOMAIN
 
@@ -58,6 +54,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 def _test_authentication(username: str, password: str) -> dict[str, Any]:
     """Test authentication with LoJack API (blocking)."""
     try:
+        from lojack_clients.identity import AuthenticatedClient as IdentityClient
+        from lojack_clients.identity.api.default import get_identity_token
+        from lojack_clients.services import AuthenticatedClient as ServicesClient
+        from lojack_clients.services.api.default import get_all_user_assets
+
         # Create identity client and get token
         identity_client = IdentityClient.from_login(username, password)
         token_response = get_identity_token.sync(client=identity_client)
@@ -91,7 +92,7 @@ class LoJackConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
@@ -123,13 +124,13 @@ class LoJackConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle reauthorization."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle reauthorization confirmation."""
         errors: dict[str, str] = {}
 

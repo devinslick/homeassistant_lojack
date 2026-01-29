@@ -3,31 +3,24 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from lojack_clients.identity import AuthenticatedClient as IdentityClient
-from lojack_clients.identity.api.default import get_identity_token
-from lojack_clients.services import AuthenticatedClient as ServicesClient
-from lojack_clients.services.api.default import get_all_user_assets, get_asset
-
 from .const import (
-    CONF_PASSWORD,
-    CONF_TOKEN,
-    CONF_TOKEN_EXPIRES,
-    CONF_USERNAME,
     DATA_ASSETS,
     DATA_CLIENT,
     DATA_COORDINATOR,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
-    PLATFORMS,
 )
+
+if TYPE_CHECKING:
+    from lojack_clients.services import AuthenticatedClient as ServicesClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,8 +73,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-def _authenticate(username: str, password: str) -> ServicesClient:
+def _authenticate(username: str, password: str) -> "ServicesClient":
     """Authenticate with LoJack and return a services client."""
+    from lojack_clients.identity import AuthenticatedClient as IdentityClient
+    from lojack_clients.identity.api.default import get_identity_token
+    from lojack_clients.services import AuthenticatedClient as ServicesClient
+
     # Create identity client and get token
     identity_client = IdentityClient.from_login(username, password)
     token_response = get_identity_token.sync(client=identity_client)
@@ -95,7 +92,7 @@ def _authenticate(username: str, password: str) -> ServicesClient:
     return services_client
 
 
-def _refresh_token(username: str, password: str) -> ServicesClient:
+def _refresh_token(username: str, password: str) -> "ServicesClient":
     """Refresh the authentication token."""
     return _authenticate(username, password)
 
@@ -106,7 +103,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        client: ServicesClient,
+        client: "ServicesClient",
         entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
@@ -171,10 +168,14 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _fetch_assets(self):
         """Fetch all user assets (blocking)."""
+        from lojack_clients.services.api.default import get_all_user_assets
+
         return get_all_user_assets.sync(client=self.client)
 
     def _fetch_asset_detail(self, asset_id: str):
         """Fetch detailed asset information (blocking)."""
+        from lojack_clients.services.api.default import get_asset
+
         try:
             return get_asset.sync(id=asset_id, client=self.client)
         except Exception as err:
