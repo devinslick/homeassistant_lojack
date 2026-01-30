@@ -190,14 +190,27 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "longitude": getattr(location, "longitude", None),
                         }
 
+                    # Get raw location data for debugging
+                    raw_data = getattr(location, "raw", None)
+                    accuracy_val = getattr(location, "accuracy", None)
+                    speed_val = getattr(location, "speed", None)
+
+                    _LOGGER.debug(
+                        "Location data for device %s: accuracy=%s, speed=%s, raw=%s",
+                        device_id,
+                        accuracy_val,
+                        speed_val,
+                        raw_data,
+                    )
+
                     asset_location: dict[str, Any] = {
                         "coordinates": coords,
-                        "accuracy": getattr(location, "accuracy", None),
+                        "accuracy": accuracy_val,
                         "address": getattr(location, "address", None),
                         "timestamp": getattr(location, "timestamp", None),
-                        "speed": getattr(location, "speed", None),
+                        "speed": speed_val,
                         "heading": getattr(location, "heading", None),
-                        "raw": getattr(location, "raw", None),
+                        "raw": raw_data,
                     }
 
                     asset["location"] = asset_location
