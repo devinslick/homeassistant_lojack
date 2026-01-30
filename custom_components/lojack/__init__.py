@@ -81,10 +81,9 @@ async def _authenticate(hass: HomeAssistant, username: str, password: str) -> "L
     from lojack_clients import LoJackClient
 
     session = async_get_clientsession(hass)
-    # Use the public API base URL
-    base_url = "https://api.lojack.com"
 
-    client = await LoJackClient.create(base_url, username, password, session=session)
+    # v0.3.0 API: create(username, password, session=session)
+    client = await LoJackClient.create(username, password, session=session)
     return client
 
 
