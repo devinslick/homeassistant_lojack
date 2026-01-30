@@ -1,6 +1,7 @@
 """Config flow for LoJack integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -26,54 +27,35 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
+    from lojack_clients import LoJackClient
+    from lojack_clients.exceptions import AuthenticationError, ApiError
+
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
 
-    # Test authentication
-    result = await hass.async_add_executor_job(
-        _test_authentication, username, password
-    )
-    if not result["success"]:
-        raise CannotConnect(result.get("error", "Unknown authentication error"))
-
-    return {
-        "title": f"LoJack ({username})",
-        "asset_count": result.get("asset_count", 0),
-    }
-
-
-def _test_authentication(username: str, password: str) -> dict[str, Any]:
-    """Test authentication with LoJack API (blocking)."""
     try:
-        from lojack_clients.identity import AuthenticatedClient as IdentityClient
-        from lojack_clients.identity.api.default import get_identity_token
-        from lojack_clients.services import AuthenticatedClient as ServicesClient
-        from lojack_clients.services.api.default import get_all_user_assets
+        # Create client and authenticate
+        client = await LoJackClient.create(username, password)
 
-        # Create identity client and get token
-        identity_client = IdentityClient.from_login(username, password)
-        token_response = get_identity_token.sync(client=identity_client)
+        # Try to list devices to verify connection
+        devices = await client.list_devices()
+        device_count = len(devices)
 
-        if token_response is None or not hasattr(token_response, 'token'):
-            return {"success": False, "error": "Failed to get authentication token"}
+        # Close the client
+        await client.close()
 
-        # Create services client and test by fetching assets
-        services_client = ServicesClient.from_token(token_response.token)
-        assets_response = get_all_user_assets.sync(client=services_client)
+        return {
+            "title": f"LoJack ({username})",
+            "device_count": device_count,
+        }
 
-        asset_count = 0
-        if assets_response and hasattr(assets_response, 'assets'):
-            asset_count = len(assets_response.assets) if assets_response.assets else 0
-
-        return {"success": True, "asset_count": asset_count}
-
+    except AuthenticationError as err:
+        raise InvalidAuth(str(err)) from err
+    except ApiError as err:
+        raise CannotConnect(str(err)) from err
     except Exception as err:
-        error_str = str(err).lower()
-        if "401" in str(err) or "unauthorized" in error_str:
-            return {"success": False, "error": "Invalid username or password"}
-        if "connection" in error_str or "network" in error_str:
-            return {"success": False, "error": "Connection error"}
-        return {"success": False, "error": str(err)}
+        _LOGGER.exception("Unexpected error during validation")
+        raise CannotConnect(str(err)) from err
 
 
 class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

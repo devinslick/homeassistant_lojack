@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+from lojack_clients import LoJackClient
+from lojack_clients.exceptions import AuthenticationError, ApiError
 
 from .const import (
     DATA_ASSETS,
@@ -18,9 +21,6 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
 )
-
-if TYPE_CHECKING:
-    from lojack_clients.services import AuthenticatedClient as ServicesClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,13 +35,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     try:
-        # Authenticate and get services client
-        client = await hass.async_add_executor_job(
-            _authenticate, username, password
-        )
-    except Exception as err:
-        _LOGGER.error("Failed to authenticate with LoJack: %s", err)
+        # Create and authenticate client
+        client = await LoJackClient.create(username, password)
+    except AuthenticationError as err:
         raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
+    except ApiError as err:
+        raise ConfigEntryAuthFailed(f"API error: {err}") from err
 
     # Create the data update coordinator
     coordinator = LoJackDataUpdateCoordinator(
@@ -68,33 +67,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS_LIST)
 
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id)
+        client: LoJackClient = data[DATA_CLIENT]
+        await client.close()
 
     return unload_ok
-
-
-def _authenticate(username: str, password: str) -> "ServicesClient":
-    """Authenticate with LoJack and return a services client."""
-    from lojack_clients.identity import AuthenticatedClient as IdentityClient
-    from lojack_clients.identity.api.default import get_identity_token
-    from lojack_clients.services import AuthenticatedClient as ServicesClient
-
-    # Create identity client and get token
-    identity_client = IdentityClient.from_login(username, password)
-    token_response = get_identity_token.sync(client=identity_client)
-
-    if token_response is None:
-        raise ConfigEntryAuthFailed("Failed to get authentication token")
-
-    # Create services client with the token
-    services_client = ServicesClient.from_token(token_response.token)
-
-    return services_client
-
-
-def _refresh_token(username: str, password: str) -> "ServicesClient":
-    """Refresh the authentication token."""
-    return _authenticate(username, password)
 
 
 class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -103,7 +80,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        client: "ServicesClient",
+        client: LoJackClient,
         entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
@@ -124,60 +101,36 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from LoJack API."""
         try:
-            # Get all assets for the user
-            assets_response = await self.hass.async_add_executor_job(
-                self._fetch_assets
-            )
+            # Get all devices for the user
+            devices = await self.client.list_devices()
 
-            if assets_response is None:
-                raise UpdateFailed("Failed to fetch assets from LoJack")
-
-            # Process assets into a dictionary keyed by asset ID
+            # Process devices into a dictionary keyed by device ID
             assets_data: dict[str, Any] = {}
 
-            if hasattr(assets_response, 'assets') and assets_response.assets:
-                for asset in assets_response.assets:
-                    asset_id = str(asset.id) if hasattr(asset, 'id') else None
-                    if asset_id:
-                        # Fetch detailed asset info including location
-                        detailed_asset = await self.hass.async_add_executor_job(
-                            self._fetch_asset_detail, asset_id
-                        )
-                        if detailed_asset:
-                            assets_data[asset_id] = detailed_asset
-                        else:
-                            assets_data[asset_id] = asset
+            for device in devices:
+                device_id = str(device.id) if hasattr(device, 'id') else None
+                if device_id:
+                    # Get location for the device
+                    try:
+                        location = await device.get_location()
+                        device._location = location
+                    except Exception as loc_err:
+                        _LOGGER.debug("Could not get location for device %s: %s", device_id, loc_err)
+                    assets_data[device_id] = device
 
             return {DATA_ASSETS: assets_data}
 
-        except Exception as err:
-            # Try to refresh the token if we get an auth error
-            if "401" in str(err) or "unauthorized" in str(err).lower():
-                _LOGGER.info("Token expired, refreshing...")
-                try:
-                    self.client = await self.hass.async_add_executor_job(
-                        _refresh_token, self._username, self._password
-                    )
-                    # Retry the fetch
-                    return await self._async_update_data()
-                except Exception as refresh_err:
-                    raise ConfigEntryAuthFailed(
-                        f"Failed to refresh token: {refresh_err}"
-                    ) from refresh_err
+        except AuthenticationError as err:
+            # Try to re-authenticate
+            _LOGGER.info("Token expired, re-authenticating...")
+            try:
+                self.client = await LoJackClient.create(self._username, self._password)
+                # Retry the fetch
+                return await self._async_update_data()
+            except AuthenticationError as refresh_err:
+                raise ConfigEntryAuthFailed(
+                    f"Re-authentication failed: {refresh_err}"
+                ) from refresh_err
+
+        except ApiError as err:
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
-
-    def _fetch_assets(self):
-        """Fetch all user assets (blocking)."""
-        from lojack_clients.services.api.default import get_all_user_assets
-
-        return get_all_user_assets.sync(client=self.client)
-
-    def _fetch_asset_detail(self, asset_id: str):
-        """Fetch detailed asset information (blocking)."""
-        from lojack_clients.services.api.default import get_asset
-
-        try:
-            return get_asset.sync(id=asset_id, client=self.client)
-        except Exception as err:
-            _LOGGER.warning("Failed to fetch details for asset %s: %s", asset_id, err)
-            return None

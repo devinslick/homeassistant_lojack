@@ -14,7 +14,6 @@ from .const import (
     ATTR_ADDRESS,
     ATTR_BATTERY_VOLTAGE,
     ATTR_COLOR,
-    ATTR_GPS_QUALITY,
     ATTR_HEADING,
     ATTR_LAST_UPDATED,
     ATTR_LICENSE_PLATE,
@@ -27,8 +26,6 @@ from .const import (
     DATA_ASSETS,
     DATA_COORDINATOR,
     DOMAIN,
-    KMH_TO_MPH,
-    KM_TO_MILES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,15 +41,15 @@ async def async_setup_entry(
 
     entities: list[LoJackDeviceTracker] = []
 
-    # Create a device tracker for each asset
+    # Create a device tracker for each device
     if coordinator.data and DATA_ASSETS in coordinator.data:
-        for asset_id, asset in coordinator.data[DATA_ASSETS].items():
+        for device_id, device in coordinator.data[DATA_ASSETS].items():
             entities.append(
                 LoJackDeviceTracker(
                     coordinator,
                     entry,
-                    asset_id,
-                    asset,
+                    device_id,
+                    device,
                 )
             )
 
@@ -68,24 +65,22 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         self,
         coordinator,
         entry: ConfigEntry,
-        asset_id: str,
-        asset: Any,
+        device_id: str,
+        device: Any,
     ) -> None:
         """Initialize the device tracker."""
         super().__init__(coordinator)
         self._entry = entry
-        self._asset_id = asset_id
-        self._asset = asset
+        self._device_id = device_id
+        self._device = device
 
         # Extract vehicle info for device identification
-        self._vin = self._get_attr(asset, "vin", "")
-        self._make = self._get_attr(asset, "make", "")
-        self._model = self._get_attr(asset, "model", "")
-        self._year = self._get_attr(asset, "year", "")
-        self._color = self._get_attr(asset, "color", "")
-        self._name = self._get_attr(asset, "name", "") or self._get_attr(
-            asset, "alias", ""
-        )
+        self._vin = self._get_attr(device, "vin", "")
+        self._make = self._get_attr(device, "make", "")
+        self._model = self._get_attr(device, "model", "")
+        self._year = str(self._get_attr(device, "year", "") or "")
+        self._color = self._get_attr(device, "color", "")
+        self._name = self._get_attr(device, "name", "")
 
         # Generate a friendly name
         if self._name:
@@ -93,10 +88,10 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         elif self._year and self._make and self._model:
             self._friendly_name = f"{self._year} {self._make} {self._model}"
         else:
-            self._friendly_name = f"Vehicle {asset_id}"
+            self._friendly_name = f"Vehicle {device_id}"
 
         # Set unique ID
-        self._attr_unique_id = f"{DOMAIN}_{asset_id}"
+        self._attr_unique_id = f"{DOMAIN}_{device_id}"
 
     def _get_attr(self, obj: Any, attr: str, default: Any = None) -> Any:
         """Safely get an attribute from an object."""
@@ -112,59 +107,47 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         if isinstance(obj, dict):
             return obj.get(attr, default)
 
-        # Try nested attributes (e.g., for location.coordinates)
-        if hasattr(obj, 'attributes') and obj.attributes:
-            attrs = obj.attributes
-            if hasattr(attrs, attr):
-                return getattr(attrs, attr, default)
-            if isinstance(attrs, dict):
-                return attrs.get(attr, default)
-
         return default
 
-    def _get_location(self, asset: Any) -> dict[str, Any]:
-        """Extract location data from asset."""
+    def _get_location_data(self, device: Any) -> dict[str, Any]:
+        """Extract location data from device."""
         location_data = {
             "latitude": None,
             "longitude": None,
             "accuracy": None,
+            "address": None,
+            "speed": None,
+            "heading": None,
+            "timestamp": None,
         }
 
-        if asset is None:
+        if device is None:
             return location_data
 
-        # Try to get location from asset.location
-        location = self._get_attr(asset, "location")
+        # Try to get location from device._location (set by coordinator)
+        location = self._get_attr(device, "_location") or self._get_attr(device, "location")
+
         if location:
-            # Try coordinates object
-            coords = self._get_attr(location, "coordinates")
-            if coords:
-                location_data["latitude"] = self._get_attr(coords, "latitude")
-                location_data["longitude"] = self._get_attr(coords, "longitude")
-            else:
-                # Try direct lat/lng on location
-                location_data["latitude"] = self._get_attr(location, "latitude")
-                location_data["longitude"] = self._get_attr(location, "longitude")
-
+            location_data["latitude"] = self._get_attr(location, "latitude")
+            location_data["longitude"] = self._get_attr(location, "longitude")
             location_data["accuracy"] = self._get_attr(location, "accuracy")
-
-        # Try direct lat/lng on asset
-        if location_data["latitude"] is None:
-            location_data["latitude"] = self._get_attr(asset, "latitude")
-            location_data["longitude"] = self._get_attr(asset, "longitude")
+            location_data["address"] = self._get_attr(location, "address")
+            location_data["speed"] = self._get_attr(location, "speed")
+            location_data["heading"] = self._get_attr(location, "heading")
+            location_data["timestamp"] = self._get_attr(location, "timestamp")
 
         return location_data
 
     @property
-    def current_asset(self) -> Any:
-        """Get the current asset data from coordinator."""
+    def current_device(self) -> Any:
+        """Get the current device data from coordinator."""
         if (
             self.coordinator.data
             and DATA_ASSETS in self.coordinator.data
-            and self._asset_id in self.coordinator.data[DATA_ASSETS]
+            and self._device_id in self.coordinator.data[DATA_ASSETS]
         ):
-            return self.coordinator.data[DATA_ASSETS][self._asset_id]
-        return self._asset
+            return self.coordinator.data[DATA_ASSETS][self._device_id]
+        return self._device
 
     @property
     def name(self) -> str:
@@ -179,7 +162,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def latitude(self) -> float | None:
         """Return the latitude of the device."""
-        location = self._get_location(self.current_asset)
+        location = self._get_location_data(self.current_device)
         lat = location.get("latitude")
         if lat is not None:
             try:
@@ -191,7 +174,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def longitude(self) -> float | None:
         """Return the longitude of the device."""
-        location = self._get_location(self.current_asset)
+        location = self._get_location_data(self.current_device)
         lng = location.get("longitude")
         if lng is not None:
             try:
@@ -203,7 +186,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def location_accuracy(self) -> int:
         """Return the location accuracy of the device."""
-        location = self._get_location(self.current_asset)
+        location = self._get_location_data(self.current_device)
         accuracy = location.get("accuracy")
         if accuracy is not None:
             try:
@@ -216,14 +199,13 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     def battery_level(self) -> int | None:
         """Return the battery level of the device (if applicable)."""
         # LoJack devices report vehicle battery voltage, not percentage
-        # Return None as this isn't a 0-100 battery level
         return None
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         info = {
-            "identifiers": {(DOMAIN, self._asset_id)},
+            "identifiers": {(DOMAIN, self._device_id)},
             "name": self._friendly_name,
             "manufacturer": "Spireon LoJack",
         }
@@ -239,98 +221,68 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
-        asset = self.current_asset
+        device = self.current_device
         attrs: dict[str, Any] = {}
 
         # Vehicle identification
-        vin = self._get_attr(asset, "vin")
+        vin = self._get_attr(device, "vin")
         if vin:
             attrs[ATTR_VIN] = vin
 
-        make = self._get_attr(asset, "make")
+        make = self._get_attr(device, "make")
         if make:
             attrs[ATTR_MAKE] = make
 
-        model = self._get_attr(asset, "model")
+        model = self._get_attr(device, "model")
         if model:
             attrs[ATTR_MODEL] = model
 
-        year = self._get_attr(asset, "year")
+        year = self._get_attr(device, "year")
         if year:
-            attrs[ATTR_YEAR] = year
+            attrs[ATTR_YEAR] = str(year)
 
-        color = self._get_attr(asset, "color")
+        color = self._get_attr(device, "color")
         if color:
             attrs[ATTR_COLOR] = color
 
-        license_plate = self._get_attr(asset, "licensePlate") or self._get_attr(
-            asset, "license_plate"
-        )
+        license_plate = self._get_attr(device, "license_plate")
         if license_plate:
             attrs[ATTR_LICENSE_PLATE] = license_plate
 
-        # Location-related attributes
-        location = self._get_attr(asset, "location")
-        if location:
-            # Address
-            address = self._get_attr(location, "address")
-            if address:
-                # Address might be an object with formatted string
-                if hasattr(address, "formatted"):
-                    attrs[ATTR_ADDRESS] = address.formatted
-                elif isinstance(address, str):
-                    attrs[ATTR_ADDRESS] = address
-                elif isinstance(address, dict):
-                    attrs[ATTR_ADDRESS] = address.get("formatted", str(address))
-
-            # GPS quality
-            gps_quality = self._get_attr(location, "gpsFixQuality") or self._get_attr(
-                location, "gps_fix_quality"
-            )
-            if gps_quality:
-                attrs[ATTR_GPS_QUALITY] = str(gps_quality)
-
-        # Vehicle telemetry
-        speed = self._get_attr(asset, "speed")
-        if speed is not None:
-            try:
-                # Convert from km/h to mph
-                attrs[ATTR_SPEED] = round(float(speed) * KMH_TO_MPH, 1)
-            except (ValueError, TypeError):
-                pass
-
-        heading = self._get_attr(asset, "heading")
-        if heading is not None:
-            try:
-                attrs[ATTR_HEADING] = float(heading)
-            except (ValueError, TypeError):
-                pass
-
-        odometer = self._get_attr(asset, "odometer")
+        odometer = self._get_attr(device, "odometer")
         if odometer is not None:
             try:
-                # Convert from km to miles
-                attrs[ATTR_ODOMETER] = round(float(odometer) * KM_TO_MILES, 1)
+                attrs[ATTR_ODOMETER] = round(float(odometer), 1)
             except (ValueError, TypeError):
                 pass
 
-        battery_voltage = self._get_attr(asset, "batteryVoltage") or self._get_attr(
-            asset, "battery_voltage"
-        )
+        battery_voltage = self._get_attr(device, "battery_voltage")
         if battery_voltage is not None:
             try:
                 attrs[ATTR_BATTERY_VOLTAGE] = round(float(battery_voltage), 2)
             except (ValueError, TypeError):
                 pass
 
-        # Timestamps
-        last_updated = (
-            self._get_attr(asset, "lastUpdated")
-            or self._get_attr(asset, "last_updated")
-            or self._get_attr(asset, "timestamp")
-        )
-        if last_updated:
-            attrs[ATTR_LAST_UPDATED] = str(last_updated)
+        # Location-related attributes
+        location = self._get_location_data(device)
+
+        if location.get("address"):
+            attrs[ATTR_ADDRESS] = str(location["address"])
+
+        if location.get("speed") is not None:
+            try:
+                attrs[ATTR_SPEED] = round(float(location["speed"]), 1)
+            except (ValueError, TypeError):
+                pass
+
+        if location.get("heading") is not None:
+            try:
+                attrs[ATTR_HEADING] = float(location["heading"])
+            except (ValueError, TypeError):
+                pass
+
+        if location.get("timestamp"):
+            attrs[ATTR_LAST_UPDATED] = str(location["timestamp"])
 
         return attrs
 

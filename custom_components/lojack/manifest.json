@@ -7,6 +7,6 @@
   "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/devinslick/homeassistant_lojack/issues",
-  "requirements": ["lojack-clients==1.0.2"],
+  "requirements": ["lojack_clients @ git+https://github.com/devinslick/lojack_api.git@main"],
   "version": "1.0.0"
 }
