@@ -20,6 +20,8 @@ from .const import (
     DATA_CLIENT,
     DATA_COORDINATOR,
     DEFAULT_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    MAX_POLL_INTERVAL,
     DOMAIN,
 )
 
