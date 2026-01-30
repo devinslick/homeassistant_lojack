@@ -33,10 +33,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     from lojack_clients.exceptions import AuthenticationError, ApiError
 
     session = async_get_clientsession(hass)
-    base_url = "https://api.lojack.com"
 
     try:
-        client = await LoJackClient.create(base_url, username, password, session=session)
+        # v0.3.0 API: create(username, password, session=session)
+        client = await LoJackClient.create(username, password, session=session)
         try:
             devices = await client.list_devices()
             device_count = len(devices) if devices else 0
