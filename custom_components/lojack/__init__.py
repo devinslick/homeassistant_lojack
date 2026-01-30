@@ -10,10 +10,8 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from lojack_clients import LoJackClient
-from lojack_clients.exceptions import AuthenticationError, ApiError
+from lojack_api import LoJackClient, AuthenticationError, ApiError
 
 from .const import (
     DATA_ASSETS,
@@ -26,7 +24,7 @@ from .const import (
 )
 
 if TYPE_CHECKING:
-    from lojack_clients.api import LoJackClient
+    from lojack_api import LoJackClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,12 +78,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _authenticate(hass: HomeAssistant, username: str, password: str) -> "LoJackClient":
     """Authenticate with LoJack and return an async LoJackClient."""
-    from lojack_clients import LoJackClient
+    from lojack_api import LoJackClient
 
-    session = async_get_clientsession(hass)
-
-    # v0.3.0 API: create(username, password, session=session)
-    client = await LoJackClient.create(username, password, session=session)
+    # v0.5.0 API: create(username, password)
+    client = await LoJackClient.create(username, password)
     return client
 
 

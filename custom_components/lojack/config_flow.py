@@ -10,7 +10,6 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, MIN_POLL_INTERVAL, MAX_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
 
@@ -29,14 +28,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
 
-    from lojack_clients import LoJackClient
-    from lojack_clients.exceptions import AuthenticationError, ApiError
-
-    session = async_get_clientsession(hass)
+    from lojack_api import LoJackClient, AuthenticationError, ApiError
 
     try:
-        # v0.3.0 API: create(username, password, session=session)
-        client = await LoJackClient.create(username, password, session=session)
+        # v0.5.0 API: create(username, password)
+        client = await LoJackClient.create(username, password)
         try:
             devices = await client.list_devices()
             device_count = len(devices) if devices else 0
