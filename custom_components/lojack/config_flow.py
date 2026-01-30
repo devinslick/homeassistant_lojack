@@ -6,11 +6,10 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow
+from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
@@ -29,8 +28,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     """Validate the user input allows us to connect."""
     username = data[CONF_USERNAME]
     password = data[CONF_PASSWORD]
+
     from lojack_clients import LoJackClient
-    from lojack_clients import AuthenticationError, ConnectionError
+    from lojack_clients.exceptions import AuthenticationError, ApiError
 
     session = async_get_clientsession(hass)
     base_url = "https://api.lojack.com"
@@ -39,23 +39,19 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         client = await LoJackClient.create(base_url, username, password, session=session)
         try:
             devices = await client.list_devices()
-            asset_count = len(devices) if devices else 0
+            device_count = len(devices) if devices else 0
         finally:
             await client.close()
 
-        return {"title": f"LoJack ({username})", "asset_count": asset_count}
+        return {"title": f"LoJack ({username})", "device_count": device_count}
 
-    except AuthenticationError:
-        raise InvalidAuth("Invalid username or password")
-    except ConnectionError:
-        raise CannotConnect("Connection error")
+    except AuthenticationError as err:
+        raise InvalidAuth(f"Invalid username or password: {err}") from err
+    except ApiError as err:
+        raise CannotConnect(f"API error: {err}") from err
     except Exception as err:
-        raise CannotConnect(str(err))
-
-
-def _test_authentication(username: str, password: str) -> dict[str, Any]:
-    """Removed blocking test; kept for compatibility but not used."""
-    return {"success": False, "error": "Unsupported"}
+        _LOGGER.exception("Unexpected error during validation")
+        raise CannotConnect(str(err)) from err
 
 
 class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):

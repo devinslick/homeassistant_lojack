@@ -12,6 +12,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from lojack_clients import LoJackClient
+from lojack_clients.exceptions import AuthenticationError, ApiError
+
 from .const import (
     DATA_ASSETS,
     DATA_CLIENT,
@@ -37,6 +40,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         client = await _authenticate(hass, username, password)
+    except AuthenticationError as err:
+        raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
+    except ApiError as err:
+        raise ConfigEntryAuthFailed(f"API error: {err}") from err
     except Exception as err:
         _LOGGER.error("Failed to authenticate with LoJack: %s", err)
         raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
@@ -62,7 +69,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS_LIST)
 
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id)
+        client: LoJackClient = data[DATA_CLIENT]
+        await client.close()
 
     return unload_ok
 
@@ -161,18 +170,27 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             return {DATA_ASSETS: assets_data}
 
+        except AuthenticationError as err:
+            _LOGGER.info("Token expired, refreshing...")
+            try:
+                self.client = await _refresh_token(self.hass, self._username, self._password)
+                return await self._async_update_data()
+            except Exception as refresh_err:
+                raise ConfigEntryAuthFailed(
+                    f"Failed to refresh token: {refresh_err}"
+                ) from refresh_err
+
+        except ApiError as err:
+            raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
+
         except Exception as err:
-            # Try to refresh the token if we get an auth error
             if "401" in str(err) or "unauthorized" in str(err).lower():
                 _LOGGER.info("Token expired, refreshing...")
                 try:
                     self.client = await _refresh_token(self.hass, self._username, self._password)
-                    # Retry the fetch
                     return await self._async_update_data()
                 except Exception as refresh_err:
                     raise ConfigEntryAuthFailed(
                         f"Failed to refresh token: {refresh_err}"
                     ) from refresh_err
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
-
-    # note: new async client is used; no blocking fetch helpers needed
