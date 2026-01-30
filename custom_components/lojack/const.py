@@ -8,7 +8,7 @@ PLATFORMS = ["device_tracker"]
 # Polling intervals (in minutes)
 DEFAULT_POLL_INTERVAL = 5
 MIN_POLL_INTERVAL = 1
-MAX_POLL_INTERVAL = 60
+MAX_POLL_INTERVAL = 720
 
 # Data keys
 DATA_CLIENT = "client"

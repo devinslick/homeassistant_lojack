@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from .const import DOMAIN, MIN_POLL_INTERVAL, MAX_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -130,6 +130,38 @@ class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+
+class LoJackOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options for LoJack integration."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Manage the options."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Validate done by voluptuous schema; simply create the entry
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL)
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    "poll_interval", default=current
+                ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL))
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+
+
+    @staticmethod
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        return LoJackOptionsFlowHandler(config_entry)
 
 
 class CannotConnect(Exception):

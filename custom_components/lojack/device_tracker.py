@@ -128,8 +128,16 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         location = self._get_attr(device, "_location") or self._get_attr(device, "location")
 
         if location:
-            location_data["latitude"] = self._get_attr(location, "latitude")
-            location_data["longitude"] = self._get_attr(location, "longitude")
+            # Some coordinator/client implementations nest coords under `coordinates`.
+            coords = self._get_attr(location, "coordinates")
+
+            if coords:
+                location_data["latitude"] = self._get_attr(coords, "latitude")
+                location_data["longitude"] = self._get_attr(coords, "longitude")
+            else:
+                location_data["latitude"] = self._get_attr(location, "latitude")
+                location_data["longitude"] = self._get_attr(location, "longitude")
+
             location_data["accuracy"] = self._get_attr(location, "accuracy")
             location_data["address"] = self._get_attr(location, "address")
             location_data["speed"] = self._get_attr(location, "speed")

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -107,14 +107,53 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._username = entry.data[CONF_USERNAME]
         self._password = entry.data[CONF_PASSWORD]
 
+        # Configure default update interval from entry options
+        default_minutes = entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL)
+        self._default_update_interval = timedelta(minutes=default_minutes)
+        self._min_update_interval = timedelta(minutes=MIN_POLL_INTERVAL)
+        self._max_update_interval = timedelta(minutes=MAX_POLL_INTERVAL)
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(
-                minutes=entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL)
-            ),
+            update_interval=self._default_update_interval,
         )
+
+        # track when we last hit rate limits to avoid rapid flips
+        self._last_rate_limit: datetime | None = None
+
+    def _extract_retry_after(self, err: Exception) -> int | None:
+        """Try to extract Retry-After seconds from an exception or its response headers."""
+        # Lazy import for parsing
+        from email.utils import parsedate_to_datetime
+
+        # Common places headers might be stored on wrapped exceptions
+        headers = getattr(err, "headers", None)
+        if not headers:
+            resp = getattr(err, "response", None)
+            if resp is not None:
+                headers = getattr(resp, "headers", None)
+
+        if headers and "Retry-After" in headers:
+            val = headers.get("Retry-After")
+            if val is None:
+                return None
+            # Retry-After may be seconds or HTTP-date
+            try:
+                return int(val)
+            except Exception:
+                try:
+                    retry_dt = parsedate_to_datetime(val)
+                    # parsedate_to_datetime returns aware datetime when possible
+                    now = datetime.utcnow()
+                    if retry_dt.tzinfo is not None:
+                        retry_dt = retry_dt.astimezone(tz=None).replace(tzinfo=None)
+                    secs = int((retry_dt - now).total_seconds())
+                    return max(0, secs)
+                except Exception:
+                    return None
+
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from LoJack API."""
@@ -168,11 +207,12 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 assets_data[str(device_id)] = asset
 
             return {DATA_ASSETS: assets_data}
-
         except AuthenticationError as err:
             _LOGGER.info("Token expired, refreshing...")
             try:
                 self.client = await _refresh_token(self.hass, self._username, self._password)
+                # After reauth, restore default polling interval
+                self.update_interval = self._default_update_interval
                 return await self._async_update_data()
             except Exception as refresh_err:
                 raise ConfigEntryAuthFailed(
@@ -180,16 +220,78 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ) from refresh_err
 
         except ApiError as err:
+            # Detect rate limit responses (429) and adapt polling interval
+            retry_after = self._extract_retry_after(err)
+            is_rate_limited = False
+            if getattr(err, "status", None) == 429 or "429" in str(err) or "Too Many Requests" in str(err):
+                is_rate_limited = True
+
+            if is_rate_limited:
+                self._last_rate_limit = datetime.utcnow()
+                if retry_after:
+                    new_interval = timedelta(seconds=retry_after)
+                    _LOGGER.warning(
+                        "LoJack API rate limited: respecting Retry-After=%s seconds; setting update interval to %s",
+                        retry_after,
+                        new_interval,
+                    )
+                else:
+                    # Exponential backoff (double up to max)
+                    new_interval = min(self.update_interval * 2, self._max_update_interval)
+                    _LOGGER.warning(
+                        "LoJack API rate limited: increasing update interval to %s",
+                        new_interval,
+                    )
+
+                # Enforce reasonable bounds
+                if new_interval < self._min_update_interval:
+                    new_interval = self._min_update_interval
+                if new_interval > self._max_update_interval:
+                    new_interval = self._max_update_interval
+
+                self.update_interval = new_interval
+                raise UpdateFailed(f"Rate limited by LoJack API: {err}") from err
+
+            # Non-rate-limit API errors are treated as update failures
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
 
         except Exception as err:
+            # Also detect generic rate-limit indications in unexpected exceptions
+            retry_after = self._extract_retry_after(err)
+            if getattr(err, "status", None) == 429 or "429" in str(err) or "Too Many Requests" in str(err) or retry_after:
+                self._last_rate_limit = datetime.utcnow()
+                if retry_after:
+                    new_interval = timedelta(seconds=retry_after)
+                    _LOGGER.warning(
+                        "LoJack API rate limited (generic exception): respecting Retry-After=%s seconds; setting update interval to %s",
+                        retry_after,
+                        new_interval,
+                    )
+                else:
+                    new_interval = min(self.update_interval * 2, self._max_update_interval)
+                    _LOGGER.warning(
+                        "LoJack API rate limited (generic exception): increasing update interval to %s",
+                        new_interval,
+                    )
+
+                if new_interval < self._min_update_interval:
+                    new_interval = self._min_update_interval
+                if new_interval > self._max_update_interval:
+                    new_interval = self._max_update_interval
+
+                self.update_interval = new_interval
+                raise UpdateFailed(f"Rate limited by LoJack API: {err}") from err
+
             if "401" in str(err) or "unauthorized" in str(err).lower():
                 _LOGGER.info("Token expired, refreshing...")
                 try:
                     self.client = await _refresh_token(self.hass, self._username, self._password)
+                    # After successful refresh, restore default polling interval
+                    self.update_interval = self._default_update_interval
                     return await self._async_update_data()
                 except Exception as refresh_err:
                     raise ConfigEntryAuthFailed(
                         f"Failed to refresh token: {refresh_err}"
                     ) from refresh_err
+
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
