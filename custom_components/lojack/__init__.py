@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from lojack_clients import LoJackClient
 from lojack_clients.exceptions import AuthenticationError, ApiError
@@ -21,6 +22,9 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
 )
+
+if TYPE_CHECKING:
+    from lojack_clients.api import LoJackClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,19 +39,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     try:
-        # Create and authenticate client
-        client = await LoJackClient.create(username, password)
+        client = await _authenticate(hass, username, password)
     except AuthenticationError as err:
         raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
     except ApiError as err:
         raise ConfigEntryAuthFailed(f"API error: {err}") from err
+    except Exception as err:
+        _LOGGER.error("Failed to authenticate with LoJack: %s", err)
+        raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
 
     # Create the data update coordinator
-    coordinator = LoJackDataUpdateCoordinator(
-        hass,
-        client,
-        entry,
-    )
+    coordinator = LoJackDataUpdateCoordinator(hass, client, entry)
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
@@ -74,13 +76,30 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+async def _authenticate(hass: HomeAssistant, username: str, password: str) -> "LoJackClient":
+    """Authenticate with LoJack and return an async LoJackClient."""
+    from lojack_clients import LoJackClient
+
+    session = async_get_clientsession(hass)
+    # Use the public API base URL
+    base_url = "https://api.lojack.com"
+
+    client = await LoJackClient.create(base_url, username, password, session=session)
+    return client
+
+
+async def _refresh_token(hass: HomeAssistant, username: str, password: str) -> "LoJackClient":
+    """Refresh the authentication by creating a new client."""
+    return await _authenticate(hass, username, password)
+
+
 class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching LoJack data."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        client: LoJackClient,
+        client: "LoJackClient",
         entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
@@ -101,36 +120,77 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from LoJack API."""
         try:
-            # Get all devices for the user
             devices = await self.client.list_devices()
 
-            # Process devices into a dictionary keyed by device ID
             assets_data: dict[str, Any] = {}
 
             for device in devices:
-                device_id = str(device.id) if hasattr(device, 'id') else None
-                if device_id:
-                    # Get location for the device
-                    try:
-                        location = await device.get_location()
-                        device._location = location
-                    except Exception as loc_err:
-                        _LOGGER.debug("Could not get location for device %s: %s", device_id, loc_err)
-                    assets_data[device_id] = device
+                device_id = getattr(device, "id", None)
+                if not device_id:
+                    continue
+
+                # Try to get latest location
+                try:
+                    location = await device.get_location()
+                except Exception:
+                    location = None
+
+                asset: dict[str, Any] = {
+                    "id": device_id,
+                    "name": getattr(device, "name", None),
+                    "vin": getattr(device, "vin", None),
+                    "make": getattr(device, "make", None),
+                    "model": getattr(device, "model", None),
+                    "year": getattr(device, "year", None),
+                    "licensePlate": getattr(device, "license_plate", None),
+                    "odometer": getattr(device, "odometer", None),
+                }
+
+                if location:
+                    coords = None
+                    if getattr(location, "latitude", None) is not None and getattr(location, "longitude", None) is not None:
+                        coords = {
+                            "latitude": getattr(location, "latitude", None),
+                            "longitude": getattr(location, "longitude", None),
+                        }
+
+                    asset_location: dict[str, Any] = {
+                        "coordinates": coords,
+                        "accuracy": getattr(location, "accuracy", None),
+                        "address": getattr(location, "address", None),
+                        "timestamp": getattr(location, "timestamp", None),
+                        "speed": getattr(location, "speed", None),
+                        "heading": getattr(location, "heading", None),
+                        "raw": getattr(location, "raw", None),
+                    }
+
+                    asset["location"] = asset_location
+
+                assets_data[str(device_id)] = asset
 
             return {DATA_ASSETS: assets_data}
 
         except AuthenticationError as err:
-            # Try to re-authenticate
-            _LOGGER.info("Token expired, re-authenticating...")
+            _LOGGER.info("Token expired, refreshing...")
             try:
-                self.client = await LoJackClient.create(self._username, self._password)
-                # Retry the fetch
+                self.client = await _refresh_token(self.hass, self._username, self._password)
                 return await self._async_update_data()
-            except AuthenticationError as refresh_err:
+            except Exception as refresh_err:
                 raise ConfigEntryAuthFailed(
-                    f"Re-authentication failed: {refresh_err}"
+                    f"Failed to refresh token: {refresh_err}"
                 ) from refresh_err
 
         except ApiError as err:
+            raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
+
+        except Exception as err:
+            if "401" in str(err) or "unauthorized" in str(err).lower():
+                _LOGGER.info("Token expired, refreshing...")
+                try:
+                    self.client = await _refresh_token(self.hass, self._username, self._password)
+                    return await self._async_update_data()
+                except Exception as refresh_err:
+                    raise ConfigEntryAuthFailed(
+                        f"Failed to refresh token: {refresh_err}"
+                    ) from refresh_err
             raise UpdateFailed(f"Error fetching LoJack data: {err}") from err
