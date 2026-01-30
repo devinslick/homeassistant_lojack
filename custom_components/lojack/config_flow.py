@@ -131,6 +131,10 @@ class LoJackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    @staticmethod
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        return LoJackOptionsFlowHandler(config_entry)
+
 
 class LoJackOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for LoJack integration."""

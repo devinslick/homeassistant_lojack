@@ -275,7 +275,25 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         location = self._get_location_data(device)
 
         if location.get("address"):
-            attrs[ATTR_ADDRESS] = str(location["address"])
+            addr = location["address"]
+            # If the address is a dict, format common parts into a readable string
+            if isinstance(addr, dict):
+                parts: list[str] = []
+                # Common keys returned by the API
+                for key in ("line1", "line2", "city", "stateOrProvince", "postalCode"):
+                    # Support both camelCase and lowercase keys just in case
+                    val = addr.get(key)
+                    if val is None:
+                        val = addr.get(key.lower())
+                    if val:
+                        parts.append(str(val))
+
+                if parts:
+                    attrs[ATTR_ADDRESS] = ", ".join(parts)
+                else:
+                    attrs[ATTR_ADDRESS] = str(addr)
+            else:
+                attrs[ATTR_ADDRESS] = str(addr)
 
         if location.get("speed") is not None:
             try:
