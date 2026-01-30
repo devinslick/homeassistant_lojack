@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.device_tracker import SourceType, TrackerEntity
@@ -31,6 +32,84 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _slugify(text: str) -> str:
+    """Convert text to a valid entity_id slug."""
+    if not text:
+        return ""
+    # Convert to lowercase and replace spaces/special chars with underscores
+    slug = text.lower()
+    slug = re.sub(r'[^a-z0-9]+', '_', slug)
+    # Remove leading/trailing underscores
+    slug = slug.strip('_')
+    return slug
+
+
+def _generate_entity_id(device: Any, used_ids: set[str]) -> str:
+    """Generate a unique entity_id for the device.
+
+    Format: lojack_{device_name}
+    If taken: lojack_{device_name}_{last4vin}
+    If still taken: lojack_{device_name}_{last4vin}_{n}
+    """
+    # Get device name (model name like "EV6")
+    device_name = ""
+    if hasattr(device, "name"):
+        device_name = device.name or ""
+    elif isinstance(device, dict):
+        device_name = device.get("name", "")
+
+    # Get VIN for fallback
+    vin = ""
+    if hasattr(device, "vin"):
+        vin = device.vin or ""
+    elif isinstance(device, dict):
+        vin = device.get("vin", "")
+
+    # Slugify the device name
+    name_slug = _slugify(device_name)
+    if not name_slug:
+        name_slug = "vehicle"
+
+    # Try base entity_id: lojack_{name}
+    base_id = f"lojack_{name_slug}"
+    if base_id not in used_ids:
+        used_ids.add(base_id)
+        return base_id
+
+    # Try with last 4 of VIN: lojack_{name}_{last4vin}
+    if vin and len(vin) >= 4:
+        last4 = vin[-4:].lower()
+        vin_id = f"{base_id}_{last4}"
+        if vin_id not in used_ids:
+            used_ids.add(vin_id)
+            return vin_id
+
+        # Try with numeric suffix: lojack_{name}_{last4vin}_{n}
+        suffix = 2
+        while True:
+            suffixed_id = f"{vin_id}_{suffix}"
+            if suffixed_id not in used_ids:
+                used_ids.add(suffixed_id)
+                return suffixed_id
+            suffix += 1
+            if suffix > 100:  # Safety limit
+                break
+
+    # Fallback: use numeric suffix on base
+    suffix = 2
+    while True:
+        suffixed_id = f"{base_id}_{suffix}"
+        if suffixed_id not in used_ids:
+            used_ids.add(suffixed_id)
+            return suffixed_id
+        suffix += 1
+        if suffix > 100:  # Safety limit
+            break
+
+    # Ultimate fallback
+    return f"{base_id}_{vin[-4:] if vin else 'unknown'}"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -40,16 +119,21 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
 
     entities: list[LoJackDeviceTracker] = []
+    used_entity_ids: set[str] = set()
 
     # Create a device tracker for each device
     if coordinator.data and DATA_ASSETS in coordinator.data:
         for device_id, device in coordinator.data[DATA_ASSETS].items():
+            # Generate unique entity_id
+            entity_id_suffix = _generate_entity_id(device, used_entity_ids)
+
             entities.append(
                 LoJackDeviceTracker(
                     coordinator,
                     entry,
                     device_id,
                     device,
+                    entity_id_suffix,
                 )
             )
 
@@ -67,6 +151,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         entry: ConfigEntry,
         device_id: str,
         device: Any,
+        entity_id_suffix: str,
     ) -> None:
         """Initialize the device tracker."""
         super().__init__(coordinator)
@@ -82,16 +167,21 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         self._color = self._get_attr(device, "color", "")
         self._name = self._get_attr(device, "name", "")
 
-        # Generate a friendly name
-        if self._name:
-            self._friendly_name = self._name
-        elif self._year and self._make and self._model:
+        # Generate friendly name: always use "Year Make Model" format
+        if self._year and self._make and self._model:
             self._friendly_name = f"{self._year} {self._make} {self._model}"
+        elif self._make and self._model:
+            self._friendly_name = f"{self._make} {self._model}"
+        elif self._name:
+            self._friendly_name = self._name
         else:
             self._friendly_name = f"Vehicle {device_id}"
 
         # Set unique ID
         self._attr_unique_id = f"{DOMAIN}_{device_id}"
+
+        # Set entity_id to lojack_{name} format
+        self.entity_id = f"device_tracker.{entity_id_suffix}"
 
     def _get_attr(self, obj: Any, attr: str, default: Any = None) -> Any:
         """Safely get an attribute from an object."""
