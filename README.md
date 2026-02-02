@@ -1,8 +1,6 @@
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 # Home Assistant LoJack Integration
 
-A custom Home Assistant integration for [Spireon LoJack](https://www.spireon.com/lojack/) vehicle tracking. Track your vehicles on the Home Assistant map with real-time GPS location, speed, heading, and vehicle telemetry.
+A Home Assistant integration for [Spireon LoJack](https://www.spireon.com/lojack/) vehicle tracking. Track your vehicles on the Home Assistant map with real-time GPS location, speed, heading, and vehicle telemetry.
 
 ## Features
 
@@ -134,7 +132,7 @@ The integration polls the LoJack API every 5 minutes by default. This balances t
 
 ## Disclaimer
 
-This integration is not affiliated with, endorsed by, or connected to Spireon or LoJack. The names Spireon and LoJack are trademarks or registered trademarks of Spireon and its subsidiaries. This project was inspired by [lojack-clients](https://pypi.org/project/lojack-clients/) Python package.
+This integration is not affiliated with, endorsed by, or connected to Spireon or LoJack. The names Spireon and LoJack are trademarks or registered trademarks of Spireon and its subsidiaries. This project was developed using the publicly available [lojack-clients](https://pypi.org/project/lojack-clients/) Python package.
 
 ## License
 
