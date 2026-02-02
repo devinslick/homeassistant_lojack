@@ -210,14 +210,6 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "timestamp": getattr(location, "timestamp", None),
                         "speed": speed_val,
                         "heading": getattr(location, "heading", None),
-                        "odometer": getattr(location, "odometer", None),
-                        "battery_voltage": getattr(location, "battery_voltage", None),
-                        "engine_hours": getattr(location, "engine_hours", None),
-                        "distance_driven": getattr(location, "distance_driven", None),
-                        "signal_strength": getattr(location, "signal_strength", None),
-                        "gps_fix_quality": getattr(location, "gps_fix_quality", None),
-                        "event_type": getattr(location, "event_type", None),
-                        "event_id": getattr(location, "event_id", None),
                         "raw": raw_data,
                     }
 

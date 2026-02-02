@@ -15,18 +15,12 @@ from .const import (
     ATTR_ADDRESS,
     ATTR_BATTERY_VOLTAGE,
     ATTR_COLOR,
-    ATTR_DISTANCE_DRIVEN,
-    ATTR_ENGINE_HOURS,
-    ATTR_EVENT_ID,
-    ATTR_EVENT_TYPE,
-    ATTR_GPS_FIX_QUALITY,
     ATTR_HEADING,
     ATTR_LAST_UPDATED,
     ATTR_LICENSE_PLATE,
     ATTR_MAKE,
     ATTR_MODEL,
     ATTR_ODOMETER,
-    ATTR_SIGNAL_STRENGTH,
     ATTR_SPEED,
     ATTR_VIN,
     ATTR_YEAR,
@@ -150,6 +144,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
     """Representation of a LoJack device tracker."""
 
     _attr_has_entity_name = True
+    _attr_name = None  # Main entity of the device, uses device name directly
 
     def __init__(
         self,
@@ -171,15 +166,15 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         self._model = self._get_attr(device, "model", "")
         self._year = str(self._get_attr(device, "year", "") or "")
         self._color = self._get_attr(device, "color", "")
-        self._name = self._get_attr(device, "name", "")
+        self._device_name = self._get_attr(device, "name", "")
 
-        # Generate friendly name: always use "Year Make Model" format
+        # Generate device name: always use "Year Make Model" format
         if self._year and self._make and self._model:
             self._friendly_name = f"{self._year} {self._make} {self._model}"
         elif self._make and self._model:
             self._friendly_name = f"{self._make} {self._model}"
-        elif self._name:
-            self._friendly_name = self._name
+        elif self._device_name:
+            self._friendly_name = self._device_name
         else:
             self._friendly_name = f"Vehicle {device_id}"
 
@@ -215,14 +210,6 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
             "speed": None,
             "heading": None,
             "timestamp": None,
-            "odometer": None,
-            "battery_voltage": None,
-            "engine_hours": None,
-            "distance_driven": None,
-            "signal_strength": None,
-            "gps_fix_quality": None,
-            "event_type": None,
-            "event_id": None,
         }
 
         if device is None:
@@ -247,14 +234,6 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
             location_data["speed"] = self._get_attr(location, "speed")
             location_data["heading"] = self._get_attr(location, "heading")
             location_data["timestamp"] = self._get_attr(location, "timestamp")
-            location_data["odometer"] = self._get_attr(location, "odometer")
-            location_data["battery_voltage"] = self._get_attr(location, "battery_voltage")
-            location_data["engine_hours"] = self._get_attr(location, "engine_hours")
-            location_data["distance_driven"] = self._get_attr(location, "distance_driven")
-            location_data["signal_strength"] = self._get_attr(location, "signal_strength")
-            location_data["gps_fix_quality"] = self._get_attr(location, "gps_fix_quality")
-            location_data["event_type"] = self._get_attr(location, "event_type")
-            location_data["event_id"] = self._get_attr(location, "event_id")
 
         return location_data
 
@@ -268,11 +247,6 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         ):
             return self.coordinator.data[DATA_ASSETS][self._device_id]
         return self._device
-
-    @property
-    def name(self) -> str:
-        """Return the name of the device."""
-        return self._friendly_name
 
     @property
     def source_type(self) -> SourceType:
@@ -385,33 +359,6 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
 
         # Location-related attributes
         location = self._get_location_data(device)
-
-        if location.get("engine_hours") is not None:
-            try:
-                attrs[ATTR_ENGINE_HOURS] = round(float(location["engine_hours"]), 1)
-            except (ValueError, TypeError):
-                pass
-
-        if location.get("distance_driven") is not None:
-            try:
-                attrs[ATTR_DISTANCE_DRIVEN] = round(float(location["distance_driven"]), 1)
-            except (ValueError, TypeError):
-                pass
-
-        if location.get("signal_strength") is not None:
-            try:
-                attrs[ATTR_SIGNAL_STRENGTH] = round(float(location["signal_strength"]), 2)
-            except (ValueError, TypeError):
-                pass
-
-        if location.get("gps_fix_quality"):
-            attrs[ATTR_GPS_FIX_QUALITY] = str(location["gps_fix_quality"])
-
-        if location.get("event_type"):
-            attrs[ATTR_EVENT_TYPE] = str(location["event_type"])
-
-        if location.get("event_id"):
-            attrs[ATTR_EVENT_ID] = str(location["event_id"])
 
         if location.get("address"):
             addr = location["address"]
