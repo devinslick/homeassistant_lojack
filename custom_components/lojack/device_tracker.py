@@ -13,17 +13,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_ADDRESS,
-    ATTR_BATTERY_VOLTAGE,
-    ATTR_COLOR,
+    ATTR_GPS_ACCURACY,
     ATTR_HEADING,
-    ATTR_LAST_UPDATED,
-    ATTR_LICENSE_PLATE,
-    ATTR_MAKE,
-    ATTR_MODEL,
-    ATTR_ODOMETER,
-    ATTR_SPEED,
-    ATTR_VIN,
-    ATTR_YEAR,
     DATA_ASSETS,
     DATA_COORDINATOR,
     DOMAIN,
@@ -318,48 +309,18 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
         device = self.current_device
         attrs: dict[str, Any] = {}
 
-        # Vehicle identification
-        vin = self._get_attr(device, "vin")
-        if vin:
-            attrs[ATTR_VIN] = vin
-
-        make = self._get_attr(device, "make")
-        if make:
-            attrs[ATTR_MAKE] = make
-
-        model = self._get_attr(device, "model")
-        if model:
-            attrs[ATTR_MODEL] = model
-
-        year = self._get_attr(device, "year")
-        if year:
-            attrs[ATTR_YEAR] = str(year)
-
-        color = self._get_attr(device, "color")
-        if color:
-            attrs[ATTR_COLOR] = color
-
-        license_plate = self._get_attr(device, "license_plate")
-        if license_plate:
-            attrs[ATTR_LICENSE_PLATE] = license_plate
-
-        odometer = self._get_attr(device, "odometer")
-        if odometer is not None:
-            try:
-                attrs[ATTR_ODOMETER] = round(float(odometer), 1)
-            except (ValueError, TypeError):
-                pass
-
-        battery_voltage = self._get_attr(device, "battery_voltage")
-        if battery_voltage is not None:
-            try:
-                attrs[ATTR_BATTERY_VOLTAGE] = round(float(battery_voltage), 2)
-            except (ValueError, TypeError):
-                pass
-
-        # Location-related attributes
+        # Location-related attributes only
         location = self._get_location_data(device)
 
+        # GPS accuracy
+        accuracy = location.get("accuracy")
+        if accuracy is not None:
+            try:
+                attrs[ATTR_GPS_ACCURACY] = int(accuracy)
+            except (ValueError, TypeError):
+                pass
+
+        # Address
         if location.get("address"):
             addr = location["address"]
             # If the address is a dict, format common parts into a readable string
@@ -381,20 +342,12 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
             else:
                 attrs[ATTR_ADDRESS] = str(addr)
 
-        if location.get("speed") is not None:
-            try:
-                attrs[ATTR_SPEED] = round(float(location["speed"]), 1)
-            except (ValueError, TypeError):
-                pass
-
+        # Heading
         if location.get("heading") is not None:
             try:
                 attrs[ATTR_HEADING] = float(location["heading"])
             except (ValueError, TypeError):
                 pass
-
-        if location.get("timestamp"):
-            attrs[ATTR_LAST_UPDATED] = str(location["timestamp"])
 
         return attrs
 

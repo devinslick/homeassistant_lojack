@@ -3,7 +3,7 @@
 DOMAIN = "lojack"
 
 # Platforms
-PLATFORMS = ["device_tracker"]
+PLATFORMS = ["device_tracker", "sensor", "binary_sensor"]
 
 # Polling intervals (in minutes)
 DEFAULT_POLL_INTERVAL = 5
@@ -28,3 +28,4 @@ ATTR_YEAR = "year"
 ATTR_COLOR = "color"
 ATTR_LICENSE_PLATE = "license_plate"
 ATTR_ADDRESS = "address"
+ATTR_GPS_ACCURACY = "gps_accuracy"
