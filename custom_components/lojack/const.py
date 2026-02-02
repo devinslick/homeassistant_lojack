@@ -29,3 +29,6 @@ ATTR_COLOR = "color"
 ATTR_LICENSE_PLATE = "license_plate"
 ATTR_ADDRESS = "address"
 ATTR_GPS_ACCURACY = "gps_accuracy"
+
+# Thresholds
+MOVEMENT_SPEED_THRESHOLD = 0.5  # mph - minimum speed to consider vehicle as moving

@@ -17,6 +17,7 @@ from .const import (
     DATA_ASSETS,
     DATA_COORDINATOR,
     DOMAIN,
+    MOVEMENT_SPEED_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -243,13 +244,14 @@ class LoJackMovingSensor(LoJackBinarySensor):
         device = self.current_device
         location = _get_location_data(device)
         
-        # Check if speed is greater than 0
+        # Check if speed is greater than the movement threshold
         speed = location.get("speed")
         if speed is not None:
             try:
                 speed_val = float(speed)
-                # Consider moving if speed > 0 mph (using a small threshold for accuracy)
-                return speed_val > 0.5
+                # Consider moving if speed exceeds the threshold
+                # Using a small threshold to account for GPS/speed sensor inaccuracy
+                return speed_val > MOVEMENT_SPEED_THRESHOLD
             except (ValueError, TypeError):
                 return None
         
