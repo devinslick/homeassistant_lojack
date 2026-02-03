@@ -142,13 +142,40 @@ def _get_location_data(device: Any) -> dict[str, Any]:
             # Check raw data for accuracy fields
             raw = _get_attr(location, "raw")
             if raw and isinstance(raw, dict):
-                accuracy = raw.get("accuracy") or raw.get("gpsAccuracy") or raw.get("hdop")
-                # If HDOP, convert to approximate meters (HDOP * 5)
-                if raw.get("hdop") and accuracy == raw.get("hdop"):
-                    try:
-                        accuracy = float(accuracy) * 5
-                    except (ValueError, TypeError):
-                        pass
+                # Use explicit None checks so that 0 is treated as a valid value
+                raw_accuracy = raw.get("accuracy")
+                if raw_accuracy is not None:
+                    accuracy = raw_accuracy
+                else:
+                    raw_gps_accuracy = raw.get("gpsAccuracy")
+                    if raw_gps_accuracy is not None:
+                        accuracy = raw_gps_accuracy
+                    else:
+                        raw_hdop = raw.get("hdop")
+                        if raw_hdop is not None:
+                            # If HDOP, convert to approximate meters (HDOP * 5)
+                            try:
+                                accuracy = float(raw_hdop) * 5
+                            except (ValueError, TypeError):
+                                # Non-numeric HDOP value, use as-is
+                                accuracy = raw_hdop
+        # If still None, estimate from gps_fix_quality
+        if accuracy is None:
+            gps_quality = _get_attr(location, "gps_fix_quality")
+            if gps_quality:
+                # Map GPS fix quality to approximate accuracy in meters
+                quality_str = str(gps_quality).upper()
+                if quality_str in ("EXCELLENT", "VERY_GOOD"):
+                    accuracy = 5
+                elif quality_str == "GOOD":
+                    accuracy = 15
+                elif quality_str in ("FAIR", "MODERATE"):
+                    accuracy = 50
+                elif quality_str in ("POOR", "BAD"):
+                    accuracy = 100
+                else:
+                    # Unknown quality, use reasonable default
+                    accuracy = 50
         location_data["accuracy"] = accuracy
 
         location_data["address"] = _get_attr(location, "address")
