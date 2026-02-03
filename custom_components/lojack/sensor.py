@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -112,6 +113,7 @@ def _get_location_data(device: Any) -> dict[str, Any]:
         "speed": None,
         "heading": None,
         "timestamp": None,
+        "battery_voltage": None,
     }
 
     if device is None:
@@ -131,11 +133,29 @@ def _get_location_data(device: Any) -> dict[str, Any]:
             location_data["latitude"] = _get_attr(location, "latitude")
             location_data["longitude"] = _get_attr(location, "longitude")
 
-        location_data["accuracy"] = _get_attr(location, "accuracy")
+        # Get accuracy - may be in meters or HDOP format
+        accuracy = _get_attr(location, "accuracy")
+        # If accuracy is None, check for alternative field names
+        if accuracy is None:
+            accuracy = _get_attr(location, "gps_accuracy")
+        if accuracy is None:
+            # Check raw data for accuracy fields
+            raw = _get_attr(location, "raw")
+            if raw and isinstance(raw, dict):
+                accuracy = raw.get("accuracy") or raw.get("gpsAccuracy") or raw.get("hdop")
+                # If HDOP, convert to approximate meters (HDOP * 5)
+                if raw.get("hdop") and accuracy == raw.get("hdop"):
+                    try:
+                        accuracy = float(accuracy) * 5
+                    except (ValueError, TypeError):
+                        pass
+        location_data["accuracy"] = accuracy
+
         location_data["address"] = _get_attr(location, "address")
         location_data["speed"] = _get_attr(location, "speed")
         location_data["heading"] = _get_attr(location, "heading")
         location_data["timestamp"] = _get_attr(location, "timestamp")
+        location_data["battery_voltage"] = _get_attr(location, "battery_voltage")
 
     return location_data
 
@@ -293,7 +313,9 @@ class LoJackBatteryVoltageSensor(LoJackSensor):
     def native_value(self) -> float | None:
         """Return the battery voltage value."""
         device = self.current_device
-        battery_voltage = _get_attr(device, "battery_voltage")
+        # battery_voltage is part of location data in lojack-api
+        location = _get_location_data(device)
+        battery_voltage = location.get("battery_voltage")
         if battery_voltage is not None:
             try:
                 return round(float(battery_voltage), 2)
@@ -322,13 +344,26 @@ class LoJackLocationLastReportedSensor(LoJackSensor):
         self._attr_unique_id = f"{DOMAIN}_{device_id}_location_last_reported"
 
     @property
-    def native_value(self) -> str | None:
-        """Return the last reported timestamp."""
+    def native_value(self) -> datetime | None:
+        """Return the last reported timestamp as a datetime object."""
         device = self.current_device
         location = _get_location_data(device)
-        
-        if location.get("timestamp"):
-            return str(location["timestamp"])
+
+        timestamp = location.get("timestamp")
+        if timestamp:
+            # Handle datetime objects directly
+            if isinstance(timestamp, datetime):
+                return timestamp
+            # Parse ISO 8601 timestamp string
+            try:
+                timestamp_str = str(timestamp)
+                # Handle 'Z' suffix for UTC
+                if timestamp_str.endswith("Z"):
+                    timestamp_str = timestamp_str[:-1] + "+00:00"
+                return datetime.fromisoformat(timestamp_str)
+            except (ValueError, AttributeError):
+                _LOGGER.debug("Failed to parse timestamp: %s", timestamp)
+                return None
         return None
 
 

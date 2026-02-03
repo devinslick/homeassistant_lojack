@@ -38,13 +38,20 @@ def _slugify(text: str) -> str:
 def _generate_entity_id(device: Any, used_ids: set[str]) -> str:
     """Generate a unique entity_id for the device.
 
-    Format: lojack_{device_name}
-    If taken: lojack_{device_name}_{last4vin}
-    If still taken: lojack_{device_name}_{last4vin}_{n}
+    Format: lojack_{model}
+    If taken: lojack_{model}_{last4vin}
+    If still taken: lojack_{model}_{last4vin}_{n}
+
+    Prefers 'model' attribute (e.g., "EV6") over 'name' which may contain
+    extraneous info like VIN (e.g., "EV6 consumer asset KNDC44LA3N5052990").
     """
-    # Get device name (model name like "EV6")
+    # Get device model (preferred) or name as fallback
     device_name = ""
-    if hasattr(device, "name"):
+    if hasattr(device, "model") and device.model:
+        device_name = device.model
+    elif isinstance(device, dict) and device.get("model"):
+        device_name = device.get("model", "")
+    elif hasattr(device, "name"):
         device_name = device.name or ""
     elif isinstance(device, dict):
         device_name = device.get("name", "")
@@ -201,6 +208,7 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
             "speed": None,
             "heading": None,
             "timestamp": None,
+            "battery_voltage": None,
         }
 
         if device is None:
@@ -220,11 +228,29 @@ class LoJackDeviceTracker(CoordinatorEntity, TrackerEntity):
                 location_data["latitude"] = self._get_attr(location, "latitude")
                 location_data["longitude"] = self._get_attr(location, "longitude")
 
-            location_data["accuracy"] = self._get_attr(location, "accuracy")
+            # Get accuracy - may be in meters or HDOP format
+            accuracy = self._get_attr(location, "accuracy")
+            # If accuracy is None, check for alternative field names
+            if accuracy is None:
+                accuracy = self._get_attr(location, "gps_accuracy")
+            if accuracy is None:
+                # Check raw data for accuracy fields
+                raw = self._get_attr(location, "raw")
+                if raw and isinstance(raw, dict):
+                    accuracy = raw.get("accuracy") or raw.get("gpsAccuracy") or raw.get("hdop")
+                    # If HDOP, convert to approximate meters (HDOP * 5)
+                    if raw.get("hdop") and accuracy == raw.get("hdop"):
+                        try:
+                            accuracy = float(accuracy) * 5
+                        except (ValueError, TypeError):
+                            pass
+            location_data["accuracy"] = accuracy
+
             location_data["address"] = self._get_attr(location, "address")
             location_data["speed"] = self._get_attr(location, "speed")
             location_data["heading"] = self._get_attr(location, "heading")
             location_data["timestamp"] = self._get_attr(location, "timestamp")
+            location_data["battery_voltage"] = self._get_attr(location, "battery_voltage")
 
         return location_data
 
