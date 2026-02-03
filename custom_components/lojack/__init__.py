@@ -194,7 +194,11 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raw_data = getattr(location, "raw", None)
                     accuracy_val = getattr(location, "accuracy", None)
                     speed_val = getattr(location, "speed", None)
+                    # battery_voltage may be on location or device level depending on API version
                     battery_voltage_val = getattr(location, "battery_voltage", None)
+                    if battery_voltage_val is None:
+                        # Fallback: check device level (raw API puts batteryVoltage at device level)
+                        battery_voltage_val = getattr(device, "battery_voltage", None)
                     timestamp_val = getattr(location, "timestamp", None)
 
                     # Log all location attributes for debugging data freshness and accuracy
