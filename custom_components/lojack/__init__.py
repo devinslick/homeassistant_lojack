@@ -194,22 +194,38 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raw_data = getattr(location, "raw", None)
                     accuracy_val = getattr(location, "accuracy", None)
                     speed_val = getattr(location, "speed", None)
+                    battery_voltage_val = getattr(location, "battery_voltage", None)
+                    timestamp_val = getattr(location, "timestamp", None)
 
+                    # Log all location attributes for debugging data freshness and accuracy
                     _LOGGER.debug(
-                        "Location data for device %s: accuracy=%s, speed=%s, raw=%s",
+                        "Location data for device %s: lat=%s, lon=%s, accuracy=%s, speed=%s, "
+                        "battery_voltage=%s, timestamp=%s, heading=%s",
                         device_id,
+                        getattr(location, "latitude", None),
+                        getattr(location, "longitude", None),
                         accuracy_val,
                         speed_val,
-                        raw_data,
+                        battery_voltage_val,
+                        timestamp_val,
+                        getattr(location, "heading", None),
                     )
+                    # Log raw data separately at a more verbose level to help debug accuracy/staleness issues
+                    if raw_data:
+                        _LOGGER.debug(
+                            "Raw location data for device %s: %s",
+                            device_id,
+                            raw_data,
+                        )
 
                     asset_location: dict[str, Any] = {
                         "coordinates": coords,
                         "accuracy": accuracy_val,
                         "address": getattr(location, "address", None),
-                        "timestamp": getattr(location, "timestamp", None),
+                        "timestamp": timestamp_val,
                         "speed": speed_val,
                         "heading": getattr(location, "heading", None),
+                        "battery_voltage": battery_voltage_val,
                         "raw": raw_data,
                     }
 
