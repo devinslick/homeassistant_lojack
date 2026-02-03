@@ -193,6 +193,23 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # Get raw location data for debugging
                     raw_data = getattr(location, "raw", None)
                     accuracy_val = getattr(location, "accuracy", None)
+
+                    # If accuracy not provided, estimate from gps_fix_quality
+                    if accuracy_val is None:
+                        gps_quality = getattr(location, "gps_fix_quality", None)
+                        if gps_quality:
+                            quality_str = str(gps_quality).upper()
+                            if quality_str in ("EXCELLENT", "VERY_GOOD"):
+                                accuracy_val = 5
+                            elif quality_str == "GOOD":
+                                accuracy_val = 15
+                            elif quality_str in ("FAIR", "MODERATE"):
+                                accuracy_val = 50
+                            elif quality_str in ("POOR", "BAD"):
+                                accuracy_val = 100
+                            else:
+                                accuracy_val = 50  # Unknown quality, use reasonable default
+
                     speed_val = getattr(location, "speed", None)
                     # battery_voltage may be on location or device level depending on API version
                     battery_voltage_val = getattr(location, "battery_voltage", None)
@@ -200,11 +217,12 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         # Fallback: check device level (raw API puts batteryVoltage at device level)
                         battery_voltage_val = getattr(device, "battery_voltage", None)
                     timestamp_val = getattr(location, "timestamp", None)
+                    gps_fix_quality_val = getattr(location, "gps_fix_quality", None)
 
                     # Log all location attributes for debugging data freshness and accuracy
                     _LOGGER.debug(
                         "Location data for device %s: lat=%s, lon=%s, accuracy=%s, speed=%s, "
-                        "battery_voltage=%s, timestamp=%s, heading=%s",
+                        "battery_voltage=%s, timestamp=%s, heading=%s, gps_fix_quality=%s",
                         device_id,
                         getattr(location, "latitude", None),
                         getattr(location, "longitude", None),
@@ -213,6 +231,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         battery_voltage_val,
                         timestamp_val,
                         getattr(location, "heading", None),
+                        gps_fix_quality_val,
                     )
                     # Log raw data separately at a more verbose level to help debug accuracy/staleness issues
                     if raw_data:
@@ -230,6 +249,7 @@ class LoJackDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "speed": speed_val,
                         "heading": getattr(location, "heading", None),
                         "battery_voltage": battery_voltage_val,
+                        "gps_fix_quality": gps_fix_quality_val,
                         "raw": raw_data,
                     }
 
