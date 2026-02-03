@@ -159,6 +159,23 @@ def _get_location_data(device: Any) -> dict[str, Any]:
                             except (ValueError, TypeError):
                                 # Non-numeric HDOP value, use as-is
                                 accuracy = raw_hdop
+        # If still None, estimate from gps_fix_quality
+        if accuracy is None:
+            gps_quality = _get_attr(location, "gps_fix_quality")
+            if gps_quality:
+                # Map GPS fix quality to approximate accuracy in meters
+                quality_str = str(gps_quality).upper()
+                if quality_str in ("EXCELLENT", "VERY_GOOD"):
+                    accuracy = 5
+                elif quality_str == "GOOD":
+                    accuracy = 15
+                elif quality_str in ("FAIR", "MODERATE"):
+                    accuracy = 50
+                elif quality_str in ("POOR", "BAD"):
+                    accuracy = 100
+                else:
+                    # Unknown quality, use reasonable default
+                    accuracy = 50
         location_data["accuracy"] = accuracy
 
         location_data["address"] = _get_attr(location, "address")
