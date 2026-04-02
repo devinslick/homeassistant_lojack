@@ -1,5 +1,6 @@
 {
   "name": "LoJack",
   "render_readme": true,
-  "homeassistant": "2024.1.0"
+  "homeassistant": "2024.1.0",
+  "deprecated": "This custom integration has been merged into Home Assistant core. Please remove it from HACS and use the built-in LoJack integration instead (Settings → Devices & Services → Add Integration → LoJack)."
 }

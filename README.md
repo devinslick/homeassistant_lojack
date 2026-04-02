@@ -1,3 +1,13 @@
+> [!WARNING]
+> **This integration is deprecated.** LoJack has been merged into Home Assistant core and this custom integration is no longer maintained.
+>
+> **Migration steps:**
+> 1. Remove this custom integration from HACS (or delete `custom_components/lojack` manually).
+> 2. Restart Home Assistant.
+> 3. Add the built-in integration via **Settings → Devices & Services → Add Integration → LoJack**.
+>
+> You will need to re-enter your credentials once after switching to the core integration.
+
 # Home Assistant LoJack Integration
 
 A Home Assistant integration for [Spireon LoJack](https://www.spireon.com/lojack/) vehicle tracking. Track your vehicles on the Home Assistant map with real-time GPS location, speed, heading, and vehicle telemetry.

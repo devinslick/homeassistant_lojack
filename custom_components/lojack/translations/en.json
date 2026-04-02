@@ -33,5 +33,11 @@
         "name": "Location"
       }
     }
+  },
+  "issues": {
+    "deprecated_custom_integration": {
+      "title": "The LoJack custom integration is deprecated",
+      "description": "The LoJack integration has been merged into Home Assistant core and this custom integration is no longer needed.\n\nTo migrate:\n1. Remove this custom integration from HACS (or delete the `custom_components/lojack` directory manually).\n2. Restart Home Assistant.\n3. Add the built-in LoJack integration via **Settings → Devices & Services → Add Integration → LoJack**.\n\nYour existing credentials will need to be re-entered once after switching to the core integration."
+    }
   }
 }
